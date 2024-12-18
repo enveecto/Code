@@ -92,9 +92,10 @@ for _ in range(72):  # Predicting hourly for the next 3 days (72 hours)
 predicted_prices = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
 dates = [data.index[-1] + timedelta(hours=i) for i in range(1, 73)]
 df_predictions = pd.DataFrame({
-    "Date": pd.to_datetime(dates).dt.tz_localize(None),  # Making sure the dates are timezone-naive
+    "Date": pd.Series(dates).dt.tz_localize(None),  # Convert to Series before using .dt
     "Predicted Price (USD)": predicted_prices.flatten()
 })
+
 
 output_file = "bitcoin_predictions_with_analysis.xlsx"
 df_predictions.to_excel(output_file, index=False)
