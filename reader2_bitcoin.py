@@ -8,13 +8,12 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 
 # Fetching Bitcoin data
-print("Fetching BTC-USD data for 1 month with daily interval...")
-data = yf.download('BTC-USD', period='1mo', interval='1d')
+print("Fetching BTC-USD data for 1 month with hourly interval...")
+data = yf.download('BTC-USD', period='1mo', interval='1h')
 
 if data.empty:
     raise ValueError("No data fetched. Please check the symbol or data constraints.")
 data['Close'] = data['Close'].ffill()
-
 
 # Technical Indicators
 print("Calculating technical indicators...")
@@ -41,7 +40,6 @@ def calculate_rsi(series, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-
 data['RSI'] = calculate_rsi(data['Close'])
 
 # Preparing the dataset for LSTM
@@ -59,7 +57,7 @@ def create_dataset(dataset, look_back=3):
         y.append(dataset[i, 0])
     return np.array(X), np.array(y)
 
-look_back = 3
+look_back = 24  # Using 24 hours of data for prediction (1 day)
 X, y = create_dataset(scaled_prices, look_back)
 X = np.reshape(X, (X.shape[0], X.shape[1], 1))
 
@@ -80,21 +78,21 @@ print("Training LSTM model...")
 model.fit(X_train, y_train, epochs=50, batch_size=1, verbose=1)
 print("Model training complete.")
 
-# Predicting the next 3 days
+# Predicting the next 3 days (72 hours)
 print("Predicting the next 3 days...")
 last_lookback = scaled_prices[-look_back:]
 predictions = []
 
-for _ in range(3):
+for _ in range(72):  # Predicting hourly for the next 3 days (72 hours)
     input_data = last_lookback.reshape(1, look_back, 1)
     prediction = model.predict(input_data, verbose=0)
     predictions.append(prediction[0, 0])
     last_lookback = np.append(last_lookback[1:], prediction, axis=0)
 
 predicted_prices = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
-dates = [data.index[-1] + timedelta(days=i) for i in range(1, 4)]
+dates = [data.index[-1] + timedelta(hours=i) for i in range(1, 73)]
 df_predictions = pd.DataFrame({
-    "Date": dates,
+    "Date": pd.to_datetime(dates).dt.tz_localize(None),  # Making sure the dates are timezone-naive
     "Predicted Price (USD)": predicted_prices.flatten()
 })
 
@@ -103,33 +101,41 @@ df_predictions.to_excel(output_file, index=False)
 print(f"Predictions saved to {output_file}.")
 
 # Plotting the results
-plt.figure(figsize=(14, 7))
+# Create subplots for three graphs
+fig, axs = plt.subplots(3, 1, figsize=(14, 18), sharex=True)
 
-# Historical and predicted prices
-plt.plot(data.index, prices, label='Actual Prices (Past)', color='blue', marker='.')
+# Graph 1: Prediction using LSTM
+axs[0].plot(data.index, prices, label='Actual Prices (Past)', color='blue', marker='.')
 all_dates = list(data.index) + dates
 all_prices = np.append(prices, predicted_prices)
-plt.plot(all_dates, all_prices, label='Predicted Prices (Future)', color='red', linestyle='--', marker='o')
+axs[0].plot(all_dates, all_prices, label='Predicted Prices (Future)', color='red', linestyle='--', marker='o')
+axs[0].set_title("Graph 1: LSTM-based Prediction")
+axs[0].set_ylabel("Price (USD)")
+axs[0].legend(loc='upper left')
+axs[0].grid()
 
-# Technical indicators
-plt.plot(data.index, data['SMA_10'], label='SMA (10)', color='orange', linestyle='--')
-plt.plot(data.index, data['EMA_10'], label='EMA (10)', color='green', linestyle='--')
-plt.fill_between(data.index, data['Bollinger_Upper'], data['Bollinger_Lower'], color='gray', alpha=0.2, label='Bollinger Bands')
+# Graph 2: Prediction using technical indicators
+axs[1].plot(data.index, prices, label='Actual Prices (Past)', color='blue', marker='.')
+axs[1].plot(data.index, data['SMA_10'], label='SMA (10)', color='orange', linestyle='--')
+axs[1].plot(data.index, data['EMA_10'], label='EMA (10)', color='green', linestyle='--')
+axs[1].fill_between(data.index, data['Bollinger_Upper'], data['Bollinger_Lower'], color='gray', alpha=0.2, label='Bollinger Bands')
+axs[1].set_title("Graph 2: Technical Analysis-based Prediction")
+axs[1].set_ylabel("Price (USD)")
+axs[1].legend(loc='upper left')
+axs[1].grid()
 
-# RSI on a secondary axis
-plt.legend(loc='upper left')
-plt.title("Bitcoin Price Prediction with Technical Analysis")
-plt.xlabel("Date")
-plt.ylabel("Price (USD)")
+# Graph 3: Combination of LSTM predictions and technical indicators
+axs[2].plot(data.index, prices, label='Actual Prices (Past)', color='blue', marker='.')
+axs[2].plot(all_dates, all_prices, label='Predicted Prices (Future)', color='red', linestyle='--', marker='o')
+axs[2].plot(data.index, data['SMA_10'], label='SMA (10)', color='orange', linestyle='--')
+axs[2].plot(data.index, data['EMA_10'], label='EMA (10)', color='green', linestyle='--')
+axs[2].fill_between(data.index, data['Bollinger_Upper'], data['Bollinger_Lower'], color='gray', alpha=0.2, label='Bollinger Bands')
+axs[2].set_title("Graph 3: Combined LSTM and Technical Analysis")
+axs[2].set_xlabel("Date")
+axs[2].set_ylabel("Price (USD)")
+axs[2].legend(loc='upper left')
+axs[2].grid()
 
-plt.twinx()
-plt.plot(data.index, data['RSI'], label='RSI (14)', color='purple', linestyle='--')
-plt.axhline(70, color='red', linestyle='--', alpha=0.5, label='Overbought Level')
-plt.axhline(30, color='blue', linestyle='--', alpha=0.5, label='Oversold Level')
-plt.ylabel("RSI Value")
-plt.legend(loc='lower right')
-
-plt.grid()
 plt.tight_layout()
 plt.show()
 
